@@ -1,10 +1,10 @@
 "use client";
 // components/admin/AdminSidebar.tsx
-// Menggunakan shadcn <Sidebar> component (sidebar-01 style)
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard,
   BookOpen,
@@ -14,6 +14,7 @@ import {
   LogOut,
   ChevronRight,
   Library,
+  Loader2,
 } from "lucide-react";
 
 import {
@@ -32,33 +33,78 @@ import {
 } from "@/components/ui/sidebar";
 
 const navMain = [
-  { title: "Dashboard",          href: "/dashboard/admin",                  icon: LayoutDashboard },
-  { title: "Manajemen Buku",     href: "/dashboard/admin/books",            icon: BookOpen },
-  { title: "Manajemen User",     href: "/dashboard/admin/user-managament",  icon: Users },
-  { title: "Peminjaman & Denda", href: "/dashboard/admin/loans",            icon: ClipboardList },
+  { title: "Dashboard",          href: "/dashboard/admin",             icon: LayoutDashboard },
+  { title: "Manajemen Buku",     href: "/dashboard/admin/books",           icon: BookOpen },
+  { title: "Manajemen User",     href: "/dashboard/admin/user-managament", icon: Users },
+  { title: "Peminjaman & Denda", href: "/dashboard/admin/loans",           icon: ClipboardList },
 ];
 
 const navSecondary = [
   { title: "Pengaturan", href: "/dashboard/admin/settings", icon: Settings },
 ];
 
+interface UserProfile {
+  name: string;
+  role: string;
+  avatar_url: string | null;
+}
+
 export function AdminSidebar() {
-  const pathname = usePathname();
+  const pathname  = usePathname();
+  const router    = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
+  
+  // State untuk menyimpan data user yang sedang login
+  const [user, setUser] = useState<UserProfile | null>(null);
+  const [loadingUser, setLoadingUser] = useState(true);
+
+  // Ambil data user saat komponen pertama kali dimuat
+  useEffect(() => {
+    async function fetchProfile() {
+      try {
+        const response = await fetch("/api/auth/profile");
+        if (response.ok) {
+          const data = await response.json();
+          setUser(data);
+        } else {
+          // Jika token tidak valid, arahkan kembali ke login
+          router.push("/login");
+        }
+      } catch (err) {
+        console.error("Gagal memuat profil user:", err);
+      } finally {
+        setLoadingUser(false);
+      }
+    }
+    fetchProfile();
+  }, [router]);
 
   const isActive = (href: string) =>
     href === "/dashboard/admin"
       ? pathname === "/dashboard/admin"
       : pathname.startsWith(href);
 
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error("Gagal logout dari server");
+    } catch (error) {
+      console.error("Logout error:", error);
+    } finally {
+      router.push("/login");
+      setTimeout(() => setLoggingOut(false), 2000);
+    }
+  };
+
   return (
     <Sidebar collapsible="icon">
       {/* ── Header ── */}
       <SidebarHeader className="border-b border-sidebar-border pb-0">
-        {/* Gold accent stripe */}
         <div className="h-0.5 w-full bg-[#F9A825] -mt-px rounded-none" />
-
         <div className="flex items-center gap-3 px-3 py-3">
-          {/* Logo */}
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white/10 border border-white/20 overflow-hidden">
             <Image
               src="/logo.png"
@@ -68,7 +114,6 @@ export function AdminSidebar() {
               className="object-contain"
             />
           </div>
-          {/* School name — hidden when collapsed */}
           <div className="flex flex-col overflow-hidden group-data-[collapsible=icon]:hidden">
             <span className="text-sm font-bold text-sidebar-foreground leading-tight truncate">
               Perpustakaan
@@ -78,13 +123,11 @@ export function AdminSidebar() {
             </span>
           </div>
         </div>
-
-        {/* Role badge */}
         <div className="px-3 pb-3 group-data-[collapsible=icon]:hidden">
           <div className="inline-flex items-center gap-1.5 rounded-full border border-[#F9A825]/30 bg-[#F9A825]/15 px-2.5 py-0.5">
             <span className="h-1.5 w-1.5 rounded-full bg-[#F9A825]" />
             <span className="text-[11px] font-semibold text-[#F9A825]">
-              Admin Panel
+              {user?.role === "admin" ? "Admin Panel" : "User Panel"}
             </span>
           </div>
         </div>
@@ -110,21 +153,14 @@ export function AdminSidebar() {
                         : "text-sidebar-foreground/70 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/60"
                     }
                   >
-                    <Link href={href} className="flex items-center gap-3">
+                    <Link href={href} className="flex items-center gap-3 w-full">
                       <Icon
                         size={17}
-                        className={
-                          isActive(href)
-                            ? "text-[#F9A825]"
-                            : "text-sidebar-foreground/50"
-                        }
+                        className={isActive(href) ? "text-[#F9A825]" : "text-sidebar-foreground/50"}
                       />
                       <span>{title}</span>
                       {isActive(href) && (
-                        <ChevronRight
-                          size={13}
-                          className="ml-auto text-sidebar-foreground/30"
-                        />
+                        <ChevronRight size={13} className="ml-auto text-sidebar-foreground/30" />
                       )}
                     </Link>
                   </SidebarMenuButton>
@@ -136,7 +172,6 @@ export function AdminSidebar() {
 
         <SidebarSeparator className="bg-sidebar-border" />
 
-        {/* Secondary */}
         <SidebarGroup>
           <SidebarGroupLabel className="text-sidebar-foreground/40 text-[10px] uppercase tracking-widest font-semibold px-3">
             Sistem
@@ -150,7 +185,7 @@ export function AdminSidebar() {
                     tooltip={title}
                     className="text-sidebar-foreground/60 hover:text-sidebar-accent-foreground hover:bg-sidebar-accent/60"
                   >
-                    <Link href={href}>
+                    <Link href={href} className="flex items-center gap-3 w-full">
                       <Icon size={17} />
                       <span>{title}</span>
                     </Link>
@@ -165,18 +200,41 @@ export function AdminSidebar() {
       {/* ── Footer ── */}
       <SidebarFooter className="border-t border-sidebar-border">
         <SidebarMenu>
-          {/* Admin info */}
+          {/* Admin / User Info Dinamis */}
           <SidebarMenuItem>
             <SidebarMenuButton
-              tooltip="Admin"
-              className="text-sidebar-foreground/70 hover:bg-sidebar-accent/60 group-data-[collapsible=icon]:justify-center"
+              tooltip={user?.name ?? "Profil"}
+              className="text-sidebar-foreground/70 hover:bg-sidebar-accent/60 group-data-[collapsible=icon]:justify-center h-12"
             >
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/15 border border-white/20">
-                <Library size={14} className="text-white" />
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/15 border border-white/20 overflow-hidden">
+                {user?.avatar_url ? (
+                  <Image
+                    src={user.avatar_url}
+                    alt={user.name}
+                    width={28}
+                    height={28}
+                    className="object-cover h-full w-full"
+                  />
+                ) : (
+                  <Library size={14} className="text-white" />
+                )}
               </div>
-              <div className="flex flex-col leading-none group-data-[collapsible=icon]:hidden">
-                <span className="text-sm font-semibold text-sidebar-foreground">Pak Surya</span>
-                <span className="text-xs text-sidebar-foreground/50">Administrator</span>
+              <div className="flex flex-col items-start text-left leading-tight group-data-[collapsible=icon]:hidden max-w-[150px]">
+                {loadingUser ? (
+                  <>
+                    <div className="h-3 w-20 bg-sidebar-foreground/20 animate-pulse rounded mb-1" />
+                    <div className="h-2.5 w-14 bg-sidebar-foreground/10 animate-pulse rounded" />
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm font-semibold text-sidebar-foreground truncate w-full">
+                      {user?.name ?? "Guest"}
+                    </span>
+                    <span className="text-xs text-sidebar-foreground/50 capitalize">
+                      {user?.role ?? "Pengunjung"}
+                    </span>
+                  </>
+                )}
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -184,14 +242,19 @@ export function AdminSidebar() {
           {/* Logout */}
           <SidebarMenuItem>
             <SidebarMenuButton
-              asChild
               tooltip="Keluar"
-              className="text-red-300/70 hover:text-red-300 hover:bg-red-500/10"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="text-red-300/70 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-50 cursor-pointer w-full flex items-center gap-3"
             >
-              <Link href="/login">
-                <LogOut size={17} />
-                <span>Keluar</span>
-              </Link>
+              {loggingOut ? (
+                <Loader2 size={17} className="animate-spin shrink-0" />
+              ) : (
+                <LogOut size={17} className="shrink-0" />
+              )}
+              <span className="group-data-[collapsible=icon]:hidden">
+                {loggingOut ? "Keluar..." : "Keluar"}
+              </span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

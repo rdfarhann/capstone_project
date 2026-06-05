@@ -1,173 +1,232 @@
-"use client";
 // app/dashboard/admin/page.tsx
-import { BookOpen, Users, BookMarked, Wallet, AlertTriangle, Clock } from "lucide-react";
-import { AdminNavbar } from "@/components/admin/Navbar";
-import { StatCard } from "@/components/shared/StatCard";
-import { StatusBadge } from "@/components/shared/StatusBadge";
-import {
-  mockAdminStats, mockLoans, mockBooks,
-  loanTrendData, calculateFine, formatRupiah, formatDate,
-} from "@/lib/mockData";
+"use client";
 
-export default function AdminDashboardPage() {
-  const recentLoans = mockLoans.slice(0, 5);
-  const maxTrend    = Math.max(...loanTrendData.map(d => d.loans));
-  const CHART_H     = 100;
+import { useState } from "react";
+import { useStats } from "@/hooks/useApi";
+import {
+  BookOpen, Users, BookMarked, AlertTriangle,
+  Clock, TrendingUp, RefreshCw, DollarSign,
+} from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Separator } from "@/components/ui/separator";
+
+// ── Format Rupiah ────────────────────────────────────────────
+function formatRupiah(n: number) {
+  return new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
+}
+
+// ── Stat Card ────────────────────────────────────────────────
+function StatCard({
+  label, value, icon: Icon, color, sub,
+}: {
+  label: string;
+  value: string | number;
+  icon: React.ElementType;
+  color: string;
+  sub?: string;
+}) {
+  return (
+    <div className="rounded-xl border bg-white p-5 flex items-start gap-4 shadow-sm hover:shadow-md transition-shadow">
+      <div className={`rounded-lg p-3 ${color}`}>
+        <Icon className="w-5 h-5 text-white" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-gray-500 font-medium">{label}</p>
+        <p className="text-2xl font-bold text-gray-800 mt-0.5">{value}</p>
+        {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
+      </div>
+    </div>
+  );
+}
+
+// ── Bar Chart (Tailwind) ─────────────────────────────────────
+function TrendChart({ data }: { data: { date: string; count: number }[] }) {
+  const max = Math.max(...data.map((d) => d.count), 1);
+  return (
+    <div className="flex items-end gap-2 h-[120px] w-full pt-2">
+      {data.map((d) => {
+        const pct = Math.round((d.count / max) * 100);
+        const px = Math.max(Math.round((pct / 100) * 120), 4);
+        return (
+          <div key={d.date} className="flex flex-col items-center gap-1 flex-1">
+            <span className="text-[10px] text-gray-500 font-medium">{d.count}</span>
+            <div
+              className="w-full rounded-t-md bg-[#2E7D32] opacity-80 hover:opacity-100 transition-opacity"
+              style={{ height: px }}
+              title={`${d.date}: ${d.count} peminjaman`}
+            />
+            <span className="text-[10px] text-gray-400">{d.date}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default function AdminOverviewPage() {
+  const { data, loading, error, refetch } = useStats();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await refetch();
+    setRefreshing(false);
+  };
+
+  const s = data?.stats;
+  const trend = data?.trend ?? [];
+
+  // Isi kosong untuk chart bila data belum cukup (7 hari)
+  const chartData = (() => {
+    if (!trend.length) return [];
+    const map = new Map(trend.map((t) => [t.date, t.count]));
+    const result: { date: string; count: number }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const label = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+      result.push({ date: label, count: map.get(label) ?? 0 });
+    }
+    return result;
+  })();
 
   return (
-    <>
-      <AdminNavbar title="Dashboard" subtitle="Selamat datang kembali, Pak Surya" />
+    <div className="flex flex-col h-full">
+      {/* Topbar */}
+      <header className="flex items-center gap-3 px-6 py-4 border-b bg-white flex-shrink-0">
+        <SidebarTrigger className="text-gray-500 hover:text-gray-700" />
+        <Separator orientation="vertical" className="h-5" />
+        <div className="flex-1">
+          <h1 className="text-lg font-semibold text-gray-800">Dashboard Admin</h1>
+          <p className="text-xs text-gray-400">Ringkasan aktivitas perpustakaan</p>
+        </div>
+        <button
+          onClick={handleRefresh}
+          disabled={loading || refreshing}
+          className="flex items-center gap-2 text-sm text-[#2E7D32] hover:text-[#1B5E20] font-medium disabled:opacity-50 transition-colors"
+        >
+          <RefreshCw className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
+      </header>
 
-      {/* ── Scrollable content area ── */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-screen-xl px-4 py-6 lg:px-8 space-y-6">
-
-          {/* ── Stat Cards ── */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-            <StatCard title="Total Buku"       value={mockAdminStats.totalBooks}                        icon={BookOpen}   color="green" subtitle="Koleksi perpustakaan" />
-            <StatCard title="Total Anggota"    value={mockAdminStats.totalUsers}                        icon={Users}      color="blue"  subtitle="Siswa terdaftar" />
-            <StatCard title="Sedang Dipinjam"  value={mockAdminStats.activeLoans}                       icon={BookMarked} color="amber" subtitle={`${mockAdminStats.overdueLoans} terlambat`} />
-            <StatCard title="Total Denda"      value={formatRupiah(mockAdminStats.totalFinesCollected)} icon={Wallet}     color="red"   subtitle="Terkumpul bulan ini" />
+      {/* Content */}
+      <main className="flex-1 overflow-y-auto p-6 bg-[#F9FBF9]">
+        {error && (
+          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            Gagal memuat data: {error}. Pastikan database MySQL berjalan.
           </div>
+        )}
 
-          {/* ── Chart + Status ── */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        {/* Stat Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+          <StatCard
+            label="Total Buku"
+            value={loading ? "—" : (s?.totalBooks ?? 0)}
+            icon={BookOpen}
+            color="bg-[#2E7D32]"
+            sub={`${s?.booksOutOfStock ?? 0} stok habis`}
+          />
+          <StatCard
+            label="Total Anggota"
+            value={loading ? "—" : (s?.totalUsers ?? 0)}
+            icon={Users}
+            color="bg-[#1565C0]"
+            sub="Siswa terdaftar"
+          />
+          <StatCard
+            label="Dipinjam Aktif"
+            value={loading ? "—" : (s?.activeLoans ?? 0)}
+            icon={BookMarked}
+            color="bg-[#E65100]"
+            sub={`${s?.pendingLoans ?? 0} menunggu approval`}
+          />
+          <StatCard
+            label="Total Denda"
+            value={loading ? "—" : formatRupiah(s?.totalFinesCollected ?? 0)}
+            icon={DollarSign}
+            color="bg-[#AD1457]"
+            sub="Terkumpul"
+          />
+        </div>
 
-            {/* Bar chart */}
-            <div className="xl:col-span-2 rounded-2xl border border-border bg-card p-5 shadow-xs">
-              <div className="flex items-center justify-between mb-5">
-                <div>
-                  <h3 className="font-bold text-foreground">Tren Peminjaman</h3>
-                  <p className="text-xs text-muted-foreground mt-0.5">6 bulan terakhir</p>
-                </div>
-                <span className="rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-semibold text-muted-foreground">
-                  2026
-                </span>
-              </div>
-
-              <div
-                className="flex items-end gap-3"
-                style={{ height: `${CHART_H + 36}px` }}
-              >
-                {loanTrendData.map((d) => {
-                  const barH = Math.max(6, Math.round((d.loans / maxTrend) * CHART_H));
-                  return (
-                    <div key={d.month} className="flex flex-1 flex-col items-center gap-1">
-                      <span className="text-xs font-semibold text-muted-foreground">{d.loans}</span>
-                      <div
-                        className="w-full rounded-t-md bg-gradient-to-t from-[#1B5E20] to-[#4CAF50] hover:opacity-80 transition-opacity cursor-default"
-                        style={{ height: `${barH}px` }}
-                      />
-                      <span className="text-[11px] text-muted-foreground">{d.month}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Status Cepat */}
-            <div className="rounded-2xl border border-border bg-card p-5 shadow-xs space-y-4">
-              <h3 className="font-bold text-foreground">Status Cepat</h3>
-
-              <div className="space-y-3">
-                {[
-                  { label: "Pengajuan Menunggu", value: mockAdminStats.pendingLoans,  Icon: Clock,         color: "text-blue-600",  bg: "bg-blue-50  ring-blue-100"  },
-                  { label: "Buku Terlambat",     value: mockAdminStats.overdueLoans,  Icon: AlertTriangle, color: "text-red-600",   bg: "bg-red-50   ring-red-100"   },
-                  { label: "Stok Menipis (<2)",  value: mockBooks.filter(b => b.availableStock < 2).length, Icon: BookOpen, color: "text-amber-600", bg: "bg-amber-50 ring-amber-100" },
-                ].map(({ label, value, Icon, color, bg }) => (
-                  <div key={label} className="flex items-center gap-3">
-                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ring-1 ${bg}`}>
-                      <Icon size={15} className={color} />
-                    </div>
-                    <p className="flex-1 text-sm text-muted-foreground">{label}</p>
-                    <span className={`text-lg font-bold ${color}`}>{value}</span>
-                  </div>
-                ))}
-              </div>
-
-              <div className="border-t border-border pt-3 space-y-1">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">
-                  Buku Populer
-                </p>
-                {mockBooks.filter(b => b.availableStock < b.stock).slice(0, 3).map(book => (
-                  <div key={book.id} className="flex items-center gap-2 py-1">
-                    <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[#E8F5E9]">
-                      <BookOpen size={12} className="text-[#1B5E20]" />
-                    </div>
-                    <p className="flex-1 text-xs text-muted-foreground truncate">{book.title}</p>
-                    <StatusBadge status={book.status} />
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* ── Tabel Peminjaman Terbaru ── */}
-          <div className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
-            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        {/* Row: Chart + Overdue */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+          {/* Tren Peminjaman */}
+          <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm p-5">
+            <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="font-bold text-foreground">Peminjaman Terbaru</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">Aktivitas sirkulasi buku terkini</p>
+                <h2 className="font-semibold text-gray-800 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-[#2E7D32]" />
+                  Tren Peminjaman
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">7 hari terakhir</p>
               </div>
-              <a
-                href="/dashboard/admin/loans"
-                className="text-xs font-semibold text-[#1B5E20] hover:underline underline-offset-2 shrink-0"
-              >
-                Lihat Semua →
-              </a>
             </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    {["Peminjam", "Buku", "Tgl Pinjam", "Batas Kembali", "Status", "Denda"].map(h => (
-                      <th
-                        key={h}
-                        className="whitespace-nowrap px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {recentLoans.map(loan => {
-                    const fine = calculateFine(loan.dueDate, loan.returnDate);
-                    return (
-                      <tr key={loan.id} className="hover:bg-muted/20 transition-colors">
-                        <td className="px-5 py-3.5">
-                          <p className="font-medium text-foreground">{loan.userName}</p>
-                          <p className="text-xs text-muted-foreground">{loan.userClass}</p>
-                        </td>
-                        <td className="px-5 py-3.5 max-w-[180px]">
-                          <p className="font-medium text-foreground truncate">{loan.bookTitle}</p>
-                          <p className="text-xs text-muted-foreground">{loan.bookAuthor}</p>
-                        </td>
-                        <td className="whitespace-nowrap px-5 py-3.5 text-sm text-muted-foreground">
-                          {formatDate(loan.borrowDate)}
-                        </td>
-                        <td className="whitespace-nowrap px-5 py-3.5 text-sm text-muted-foreground">
-                          {formatDate(loan.dueDate)}
-                        </td>
-                        <td className="px-5 py-3.5">
-                          <StatusBadge status={loan.status} />
-                        </td>
-                        <td className="px-5 py-3.5 font-semibold">
-                          <span className={fine > 0 ? "text-red-600" : "text-muted-foreground"}>
-                            {fine > 0 ? formatRupiah(fine) : "–"}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            {loading ? (
+              <div className="h-[120px] flex items-center justify-center text-sm text-gray-400">
+                Memuat data...
+              </div>
+            ) : chartData.length === 0 ? (
+              <div className="h-[120px] flex items-center justify-center text-sm text-gray-400">
+                Belum ada data peminjaman
+              </div>
+            ) : (
+              <TrendChart data={chartData} />
+            )}
           </div>
 
+          {/* Status Ringkas */}
+          <div className="bg-white rounded-xl border shadow-sm p-5">
+            <h2 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-[#E65100]" />
+              Status Saat Ini
+            </h2>
+            <div className="space-y-3">
+              {[
+                { label: "Dipinjam aktif", value: s?.activeLoans ?? 0, color: "bg-[#2E7D32]" },
+                { label: "Menunggu approval", value: s?.pendingLoans ?? 0, color: "bg-[#F9A825]" },
+                { label: "Terlambat", value: s?.overdueLoans ?? 0, color: "bg-[#C62828]" },
+                { label: "Stok habis", value: s?.booksOutOfStock ?? 0, color: "bg-[#546E7A]" },
+              ].map((item) => (
+                <div key={item.label} className="flex items-center gap-3">
+                  <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${item.color}`} />
+                  <span className="text-sm text-gray-600 flex-1">{item.label}</span>
+                  <span className="text-sm font-semibold text-gray-800">
+                    {loading ? "—" : item.value}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Links */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {[
+            { href: "/dashboard/admin/books", label: "Kelola Buku", desc: "Tambah, edit, hapus buku", icon: BookOpen, color: "bg-[#E8F5E9] text-[#2E7D32]" },
+            { href: "/dashboard/admin/user-managament", label: "Kelola Anggota", desc: "Manajemen data siswa", icon: Users, color: "bg-[#E3F2FD] text-[#1565C0]" },
+            { href: "/dashboard/admin/loans", label: "Peminjaman & Denda", desc: "Approve & proses pengembalian", icon: BookMarked, color: "bg-[#FFF3E0] text-[#E65100]" },
+          ].map((item) => (
+            <a
+              key={item.href}
+              href={item.href}
+              className="flex items-center gap-4 bg-white rounded-xl border p-4 hover:shadow-md transition-shadow group"
+            >
+              <div className={`rounded-lg p-2.5 ${item.color}`}>
+                <item.icon className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="font-medium text-gray-800 group-hover:text-[#2E7D32] transition-colors">
+                  {item.label}
+                </p>
+                <p className="text-xs text-gray-400">{item.desc}</p>
+              </div>
+            </a>
+          ))}
         </div>
       </main>
-    </>
+    </div>
   );
 }

@@ -1,220 +1,297 @@
-"use client";
 // app/dashboard/admin/books/page.tsx
-import { useState, useMemo } from "react";
-import { Plus, Search, Pencil, Trash2, BookOpen, Filter } from "lucide-react";
-import { AdminNavbar } from "@/components/admin/Navbar";
-import { StatusBadge } from "@/components/shared/StatusBadge";
-import { Modal } from "@/components/shared/Modal";
-import { Button } from "@/components/ui/button";
-import { mockBooks } from "@/lib/mockData";
-import type { Book } from "@/types";
+"use client";
 
-type BookForm = Omit<Book, "id" | "createdAt" | "status" | "availableStock">;
+import { useState, useCallback } from "react";
+import { useBooks, apiCall, type BookRow } from "@/hooks/useApi";
+import {
+  Plus, Search, Pencil, Trash2, BookOpen, X, AlertTriangle,
+} from "lucide-react";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import { Separator } from "@/components/ui/separator";
 
-const EMPTY: BookForm = { title:"", author:"", publisher:"", isbn:"", category:"", stock:1, location:"", year:new Date().getFullYear() };
-const CATS = ["Teknologi","Akuntansi","Bahasa","Matematika","Ekonomi","Bisnis","Sains","Lainnya"];
+// ── Helpers ──────────────────────────────────────────────────
+const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
+  available:   { label: "Tersedia",    cls: "bg-green-100 text-green-800" },
+  borrowed:    { label: "Dipinjam",    cls: "bg-orange-100 text-orange-800" },
+  maintenance: { label: "Maintenance", cls: "bg-gray-100 text-gray-600" },
+};
 
-export default function AdminBooksPage() {
-  const [books, setBooks]           = useState<Book[]>(mockBooks);
-  const [search, setSearch]         = useState("");
-  const [cat, setCat]               = useState("Semua");
-  const [modalOpen, setModalOpen]   = useState(false);
-  const [editTarget, setEditTarget] = useState<Book | null>(null);
-  const [form, setForm]             = useState<BookForm>(EMPTY);
-  const [deleteId, setDeleteId]     = useState<string | null>(null);
+const EMPTY_FORM = {
+  title: "", author: "", publisher: "", isbn: "",
+  category_id: "", stock: "", location: "", year: String(new Date().getFullYear()),
+};
 
-  const filtered = useMemo(() =>
-    books.filter(b => {
-      const q = search.toLowerCase();
-      return (b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q) || b.isbn.includes(q))
-        && (cat === "Semua" || b.category === cat);
-    }), [books, search, cat]);
+// ── Modal Tambah/Edit ────────────────────────────────────────
+function BookModal({
+  initial, onClose, onSaved,
+}: {
+  initial?: BookRow | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState(
+    initial
+      ? {
+          title: initial.title, author: initial.author, publisher: initial.publisher,
+          isbn: initial.isbn, category_id: String(initial.category_id),
+          stock: String(initial.stock), location: initial.location,
+          year: String(initial.year),
+        }
+      : EMPTY_FORM
+  );
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
 
-  const openAdd  = () => { setEditTarget(null); setForm(EMPTY); setModalOpen(true); };
-  const openEdit = (b: Book) => {
-    setEditTarget(b);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { id, createdAt, status, availableStock, ...rest } = b;
-    setForm(rest);
-    setModalOpen(true);
-  };
+  const set = (k: string, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  const handleSave = () => {
-    if (editTarget) {
-      setBooks(p => p.map(b => b.id === editTarget.id
-        ? { ...b, ...form, availableStock: form.stock - (b.stock - b.availableStock) }
-        : b));
-    } else {
-      setBooks(p => [{ ...form, id:`b${Date.now()}`, availableStock:form.stock, status:"available", createdAt:new Date().toISOString().split("T")[0] }, ...p]);
+  const handleSubmit = async () => {
+    const required = ["title", "author", "publisher", "isbn", "category_id", "stock", "location", "year"];
+    if (required.some((k) => !form[k as keyof typeof form])) {
+      setErr("Semua field wajib diisi"); return;
     }
-    setModalOpen(false);
+    setSaving(true); setErr("");
+    const body = { ...form, stock: Number(form.stock), year: Number(form.year), category_id: Number(form.category_id) };
+    const res = initial
+      ? await apiCall(`/api/books?id=${initial.id}`, "PUT", body)
+      : await apiCall("/api/books", "POST", body);
+    setSaving(false);
+    if (!res.ok) { setErr(res.message ?? "Gagal menyimpan"); return; }
+    onSaved();
+    onClose();
   };
-
-  const handleInput = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setForm(p => ({ ...p, [name]: name === "stock" || name === "year" ? Number(value) : value }));
-  };
-
-  const FIELDS: { label:string; name:keyof BookForm; type?:string; placeholder:string }[] = [
-    { label:"Judul Buku",   name:"title",     placeholder:"Masukkan judul buku" },
-    { label:"Penulis",      name:"author",    placeholder:"Nama penulis" },
-    { label:"Penerbit",     name:"publisher", placeholder:"Nama penerbit" },
-    { label:"ISBN",         name:"isbn",      placeholder:"978-xxx-xxx-xxx-x" },
-    { label:"Tahun Terbit", name:"year",      type:"number", placeholder:"2024" },
-    { label:"Jumlah Stok",  name:"stock",     type:"number", placeholder:"1" },
-    { label:"Lokasi/Rak",   name:"location",  placeholder:"Rak A-01" },
-  ];
 
   return (
-    <>
-      <AdminNavbar title="Manajemen Buku" subtitle={`${books.length} buku terdaftar`} />
-
-      <main className="flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-screen-xl px-4 py-6 lg:px-8 space-y-5">
-
-          {/* Toolbar */}
-          <div className="flex flex-wrap items-center gap-3 justify-between">
-            <div className="flex flex-wrap gap-2">
-              <div className="relative">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                <input value={search} onChange={e => setSearch(e.target.value)}
-                  placeholder="Cari judul, penulis, ISBN..."
-                  className="h-9 w-64 rounded-lg border border-input bg-background pl-9 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                />
-              </div>
-              <div className="relative">
-                <Filter size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                <select value={cat} onChange={e => setCat(e.target.value)}
-                  className="h-9 rounded-lg border border-input bg-background pl-8 pr-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring appearance-none cursor-pointer">
-                  <option>Semua</option>
-                  {CATS.map(c => <option key={c}>{c}</option>)}
-                </select>
-              </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-5 border-b">
+          <h2 className="text-base font-semibold text-gray-800">
+            {initial ? "Edit Buku" : "Tambah Buku Baru"}
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          {err && (
+            <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />{err}
             </div>
-            <Button onClick={openAdd} size="sm" className="bg-[#1B5E20] hover:bg-[#2E7D32] text-white gap-1.5">
-              <Plus size={15} /> Tambah Buku
-            </Button>
+          )}
+          {[
+            { label: "Judul Buku", key: "title", placeholder: "Contoh: Pemrograman Web" },
+            { label: "Penulis", key: "author", placeholder: "Nama penulis" },
+            { label: "Penerbit", key: "publisher", placeholder: "Nama penerbit" },
+            { label: "ISBN", key: "isbn", placeholder: "978-xxx-xxx-xxx-x" },
+            { label: "Lokasi/Rak", key: "location", placeholder: "Contoh: Rak A-01" },
+          ].map((f) => (
+            <div key={f.key}>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{f.label}</label>
+              <input
+                value={form[f.key as keyof typeof form]}
+                onChange={(e) => set(f.key, e.target.value)}
+                placeholder={f.placeholder}
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/40 focus:border-[#2E7D32]"
+              />
+            </div>
+          ))}
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">ID Kategori</label>
+              <input
+                type="number" value={form.category_id}
+                onChange={(e) => set("category_id", e.target.value)}
+                placeholder="1"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/40 focus:border-[#2E7D32]"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Stok</label>
+              <input
+                type="number" value={form.stock}
+                onChange={(e) => set("stock", e.target.value)}
+                placeholder="10"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/40 focus:border-[#2E7D32]"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tahun</label>
+              <input
+                type="number" value={form.year}
+                onChange={(e) => set("year", e.target.value)}
+                placeholder="2024"
+                className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/40 focus:border-[#2E7D32]"
+              />
+            </div>
           </div>
+        </div>
+        <div className="flex gap-3 p-5 border-t">
+          <button onClick={onClose} className="flex-1 border rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50 transition-colors">
+            Batal
+          </button>
+          <button
+            onClick={handleSubmit} disabled={saving}
+            className="flex-1 bg-[#2E7D32] text-white rounded-lg py-2 text-sm font-medium hover:bg-[#1B5E20] disabled:opacity-60 transition-colors"
+          >
+            {saving ? "Menyimpan..." : "Simpan"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
-          {/* Summary */}
-          <div className="flex gap-2 flex-wrap text-sm">
-            {[
-              { label:"Total",     val: books.length,                                    cls:"bg-muted text-muted-foreground" },
-              { label:"Tersedia",  val: books.filter(b=>b.status==="available").length,  cls:"bg-green-100 text-green-700" },
-              { label:"Dipinjam",  val: books.filter(b=>b.status==="borrowed").length,   cls:"bg-amber-100 text-amber-700" },
-              { label:"Ditampilkan",val:filtered.length,                                 cls:"bg-blue-100 text-blue-700" },
-            ].map(({ label, val, cls }) => (
-              <span key={label} className={`rounded-full px-3 py-0.5 text-xs font-semibold ${cls}`}>
-                {label}: {val}
-              </span>
-            ))}
+// ── Main Page ────────────────────────────────────────────────
+export default function AdminBooksPage() {
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [editBook, setEditBook] = useState<BookRow | null | undefined>(undefined);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const { data: books, loading, error, refetch } = useBooks({ search: debouncedSearch });
+
+  // Simple debounce
+  const handleSearch = useCallback((val: string) => {
+    setSearch(val);
+    const t = setTimeout(() => setDebouncedSearch(val), 400);
+    return () => clearTimeout(t);
+  }, []);
+
+  const handleDelete = async (id: number) => {
+    if (!confirm("Nonaktifkan buku ini?")) return;
+    setDeletingId(id);
+    await apiCall(`/api/books?id=${id}`, "DELETE");
+    setDeletingId(null);
+    refetch();
+  };
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Topbar */}
+      <header className="flex items-center gap-3 px-6 py-4 border-b bg-white flex-shrink-0">
+        <SidebarTrigger className="text-gray-500 hover:text-gray-700" />
+        <Separator orientation="vertical" className="h-5" />
+        <BookOpen className="w-4 h-4 text-[#2E7D32]" />
+        <div className="flex-1">
+          <h1 className="text-lg font-semibold text-gray-800">Manajemen Buku</h1>
+          <p className="text-xs text-gray-400">Kelola koleksi buku perpustakaan</p>
+        </div>
+        <button
+          onClick={() => setEditBook(null)}
+          className="flex items-center gap-2 bg-[#2E7D32] text-white text-sm px-4 py-2 rounded-lg hover:bg-[#1B5E20] transition-colors"
+        >
+          <Plus className="w-4 h-4" /> Tambah Buku
+        </button>
+      </header>
+
+      <main className="flex-1 overflow-y-auto p-6 bg-[#F9FBF9]">
+        {/* Search */}
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <input
+            value={search}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Cari judul, penulis, atau ISBN..."
+            className="w-full pl-9 pr-4 py-2.5 border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#2E7D32]/40 focus:border-[#2E7D32]"
+          />
+        </div>
+
+        {error && (
+          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+            Gagal memuat data buku: {error}
           </div>
+        )}
 
-          {/* Table */}
-          <div className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    {["Buku","Penerbit","ISBN","Kategori","Stok","Lokasi","Status","Aksi"].map(h => (
-                      <th key={h} className="whitespace-nowrap px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {filtered.length === 0 ? (
-                    <tr><td colSpan={8} className="px-5 py-16 text-center text-muted-foreground">
-                      <BookOpen size={36} className="mx-auto mb-2 opacity-20" />
-                      <p>Tidak ada buku ditemukan</p>
-                    </td></tr>
-                  ) : filtered.map(book => (
-                    <tr key={book.id} className="hover:bg-muted/20 transition-colors">
-                      <td className="px-5 py-3.5">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#E8F5E9]">
-                            <BookOpen size={14} className="text-[#1B5E20]" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="font-semibold text-foreground max-w-[160px] truncate">{book.title}</p>
-                            <p className="text-xs text-muted-foreground">{book.author}</p>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="whitespace-nowrap px-5 py-3.5 text-sm text-muted-foreground">{book.publisher}</td>
-                      <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{book.isbn}</td>
-                      <td className="px-5 py-3.5">
-                        <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{book.category}</span>
-                      </td>
-                      <td className="px-5 py-3.5 text-sm">
-                        <span className="font-bold text-foreground">{book.availableStock}</span>
-                        <span className="text-muted-foreground">/{book.stock}</span>
-                      </td>
-                      <td className="px-5 py-3.5 text-xs text-muted-foreground">{book.location}</td>
-                      <td className="px-5 py-3.5"><StatusBadge status={book.status} /></td>
-                      <td className="px-5 py-3.5">
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-blue-50 hover:text-blue-600" onClick={() => openEdit(book)}>
-                            <Pencil size={13} />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-red-50 hover:text-red-500" onClick={() => setDeleteId(book.id)}>
-                            <Trash2 size={13} />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
+        {/* Table */}
+        <div className="bg-white rounded-xl border shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-[#F1F8F1] border-b">
+                <tr>
+                  {["Judul / Penulis", "ISBN", "Kategori", "Stok", "Lokasi", "Status", "Aksi"].map((h) => (
+                    <th key={h} className="text-left px-4 py-3 font-semibold text-gray-700 whitespace-nowrap">
+                      {h}
+                    </th>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {loading ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <tr key={i}>
+                      {Array.from({ length: 7 }).map((__, j) => (
+                        <td key={j} className="px-4 py-3">
+                          <div className="h-4 bg-gray-100 rounded animate-pulse" />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
+                ) : !books?.length ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-12 text-center text-gray-400">
+                      <BookOpen className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                      {debouncedSearch ? `Tidak ada buku untuk "${debouncedSearch}"` : "Belum ada buku terdaftar"}
+                    </td>
+                  </tr>
+                ) : (
+                  books.map((book) => {
+                    const st = STATUS_LABEL[book.status] ?? STATUS_LABEL.available;
+                    return (
+                      <tr key={book.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-gray-800 line-clamp-1">{book.title}</p>
+                          <p className="text-xs text-gray-400">{book.author} · {book.year}</p>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 font-mono text-xs">{book.isbn}</td>
+                        <td className="px-4 py-3 text-gray-600">{book.category_name}</td>
+                        <td className="px-4 py-3">
+                          <span className="font-medium">{book.available_stock}</span>
+                          <span className="text-gray-400">/{book.stock}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">{book.location}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${st.cls}`}>
+                            {st.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setEditBook(book)}
+                              className="p-1.5 text-gray-400 hover:text-[#2E7D32] hover:bg-green-50 rounded-lg transition-colors"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(book.id)}
+                              disabled={deletingId === book.id}
+                              className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-40"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
+          {books && (
+            <div className="px-4 py-3 border-t text-xs text-gray-400">
+              {books.length} buku ditemukan
+            </div>
+          )}
         </div>
       </main>
 
-      {/* Modal Tambah/Edit */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)} title={editTarget ? "Edit Buku" : "Tambah Buku Baru"}>
-        <div className="space-y-4">
-          {FIELDS.map(f => (
-            <div key={f.name}>
-              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">{f.label}</label>
-              <input type={f.type ?? "text"} name={f.name} value={String(form[f.name])} onChange={handleInput} placeholder={f.placeholder}
-                className="w-full rounded-lg border border-input bg-muted/30 px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring" />
-            </div>
-          ))}
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Kategori</label>
-            <select name="category" value={form.category} onChange={handleInput}
-              className="w-full rounded-lg border border-input bg-muted/30 px-3 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
-              <option value="">Pilih kategori</option>
-              {CATS.map(c => <option key={c}>{c}</option>)}
-            </select>
-          </div>
-          <div className="flex gap-3 pt-1">
-            <Button variant="outline" className="flex-1" onClick={() => setModalOpen(false)}>Batal</Button>
-            <Button className="flex-1 bg-[#1B5E20] hover:bg-[#2E7D32] text-white" onClick={handleSave}>
-              {editTarget ? "Simpan Perubahan" : "Tambah Buku"}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Modal Hapus */}
-      <Modal isOpen={!!deleteId} onClose={() => setDeleteId(null)} title="Konfirmasi Hapus" size="sm">
-        <div className="space-y-4 text-center">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-100">
-            <Trash2 size={22} className="text-red-500" />
-          </div>
-          <div>
-            <p className="font-semibold text-foreground">Hapus buku ini?</p>
-            <p className="mt-1 text-sm text-muted-foreground">Tindakan ini tidak dapat dibatalkan.</p>
-          </div>
-          <div className="flex gap-3">
-            <Button variant="outline" className="flex-1" onClick={() => setDeleteId(null)}>Batal</Button>
-            <Button variant="destructive" className="flex-1" onClick={() => { setBooks(p => p.filter(b => b.id !== deleteId)); setDeleteId(null); }}>
-              Hapus
-            </Button>
-          </div>
-        </div>
-      </Modal>
-    </>
+      {/* Modal */}
+      {editBook !== undefined && (
+        <BookModal
+          initial={editBook}
+          onClose={() => setEditBook(undefined)}
+          onSaved={refetch}
+        />
+      )}
+    </div>
   );
 }
