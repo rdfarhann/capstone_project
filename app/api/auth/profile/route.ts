@@ -1,5 +1,5 @@
 // app/api/auth/profile/route.ts
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import jwt from "jsonwebtoken";
 
@@ -14,16 +14,23 @@ export async function GET() {
       return NextResponse.json({ message: "Tidak ada token auth" }, { status: 401 });
     }
 
-    // Verifikasi token JWT
     const decoded = jwt.verify(token, JWT_SECRET) as {
+      id: number;
+      nisn: string;
       name: string;
-      role: string;
+      email: string;
+      role: "admin" | "user";
+      class_name: string;
       avatar_url?: string | null;
     };
 
     return NextResponse.json({
+      id: decoded.id,
+      nisn: decoded.nisn,
       name: decoded.name,
+      email: decoded.email,
       role: decoded.role,
+      class_name: decoded.class_name,
       avatar_url: decoded.avatar_url ?? null,
     });
   } catch (error) {

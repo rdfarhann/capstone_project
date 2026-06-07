@@ -1,18 +1,13 @@
 "use client";
 // components/user/UserSidebar.tsx
-// Style identik dengan AdminSidebar — sidebar shadcn tema hijau
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
 import {
-  BookOpen,
-  History,
-  Bell,
-  LogOut,
-  ChevronRight,
-  UserCircle,
-  LayoutDashboard,
+  BookOpen, History, Bell, LogOut,
+  ChevronRight, UserCircle, LayoutDashboard, Loader2,
 } from "lucide-react";
 
 import {
@@ -30,28 +25,44 @@ import {
   SidebarRail,
   SidebarSeparator,
 } from "@/components/ui/sidebar";
-import { mockNotifications } from "@/lib/mockData";
-
-// ID user yang sedang login (nanti diganti dengan session)
-const MY_USER_ID = "u1";
-const MY_NAME    = "Budi Santoso";
-const MY_CLASS   = "X TKJ 1";
+import { useAuth } from "@/hooks/useAuth";
+import { useNotifications } from "@/hooks/useApi";
 
 const navItems = [
-  { title: "Beranda",         href: "/dashboard/user",                  icon: LayoutDashboard },
-  { title: "Katalog Buku",    href: "/dashboard/user/books",            icon: BookOpen },
-  { title: "Riwayat Pinjam",  href: "/dashboard/user/history",          icon: History },
-  { title: "Notifikasi",      href: "/dashboard/user/notifications",    icon: Bell },
+  { title: "Beranda",         href: "/dashboard/user",             icon: LayoutDashboard },
+  { title: "Katalog Buku",   href: "/dashboard/user/books",         icon: BookOpen },
+  { title: "Peminjaman Saya", href: "/dashboard/user/loans",         icon: History },
+  { title: "Notifikasi",     href: "/dashboard/user/notifications", icon: Bell },
 ];
 
 export function UserSidebar() {
-  const pathname = usePathname();
-  const unread   = mockNotifications.filter(n => !n.isRead && n.userId === MY_USER_ID).length;
+  const pathname          = usePathname();
+  const router            = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  // Data user dari session JWT
+  const { user } = useAuth();
+
+  // Notifikasi belum dibaca
+  const userId = String(user?.id ?? "");
+  const { data: notifications } = useNotifications(userId, true);
+  const unread = notifications?.length ?? 0;
 
   const isActive = (href: string) =>
     href === "/dashboard/user"
       ? pathname === "/dashboard/user"
       : pathname.startsWith(href);
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch (error) {
+      console.error("Logout failed:", error);
+    } finally {
+      router.push("/login");
+    }
+  };
 
   return (
     <Sidebar collapsible="icon">
@@ -94,7 +105,7 @@ export function UserSidebar() {
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel className="text-sidebar-foreground/40 text-[10px] uppercase tracking-widest font-semibold px-3">
-            Menu
+            Menu Utama
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -119,7 +130,7 @@ export function UserSidebar() {
                       {/* Badge notifikasi */}
                       {href === "/dashboard/user/notifications" && unread > 0 && (
                         <SidebarMenuBadge className="bg-red-500 text-white text-[10px] font-bold">
-                          {unread}
+                          {unread > 9 ? "9+" : unread}
                         </SidebarMenuBadge>
                       )}
                       {isActive(href) && (
@@ -141,15 +152,19 @@ export function UserSidebar() {
           {/* User info */}
           <SidebarMenuItem>
             <SidebarMenuButton
-              tooltip={MY_NAME}
-              className="text-sidebar-foreground/70 hover:bg-sidebar-accent/60"
+              tooltip={user?.name ?? "Siswa"}
+              className="text-sidebar-foreground/70 hover:bg-sidebar-accent/60 cursor-default"
             >
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/15 border border-white/20">
                 <UserCircle size={15} className="text-white" />
               </div>
               <div className="flex flex-col leading-none group-data-[collapsible=icon]:hidden">
-                <span className="text-sm font-semibold text-sidebar-foreground">{MY_NAME}</span>
-                <span className="text-xs text-sidebar-foreground/50">{MY_CLASS}</span>
+                <span className="text-sm font-semibold text-sidebar-foreground truncate max-w-[130px]">
+                  {user?.name ?? "—"}
+                </span>
+                <span className="text-xs text-sidebar-foreground/50 truncate max-w-[130px]">
+                  {user?.class_name ?? "—"}
+                </span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
@@ -157,14 +172,19 @@ export function UserSidebar() {
           {/* Logout */}
           <SidebarMenuItem>
             <SidebarMenuButton
-              asChild
               tooltip="Keluar"
-              className="text-red-300/70 hover:text-red-300 hover:bg-red-500/10"
+              onClick={handleLogout}
+              disabled={loggingOut}
+              className="text-red-400 hover:text-red-500 hover:bg-red-500/10 disabled:opacity-50 cursor-pointer w-full flex items-center gap-3"
             >
-              <Link href="/login">
-                <LogOut size={17} />
-                <span>Keluar</span>
-              </Link>
+              {loggingOut ? (
+                <Loader2 size={17} className="animate-spin shrink-0" />
+              ) : (
+                <LogOut size={17} className="shrink-0" />
+              )}
+              <span className="group-data-[collapsible=icon]:hidden">
+                {loggingOut ? "Keluar..." : "Keluar"}
+              </span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>

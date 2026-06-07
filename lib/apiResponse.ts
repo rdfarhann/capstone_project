@@ -28,3 +28,10 @@ export function serverError(error: unknown) {
     error instanceof Error ? error.message : "Internal server error";
   return NextResponse.json({ success: false, message }, { status: 500 });
 }
+export function unauthorized(message = "Belum login") {
+  return NextResponse.json({ success: false, message }, { status: 401 });
+}
+
+export function forbidden(message = "Akses ditolak") {
+  return NextResponse.json({ success: false, message }, { status: 403 });
+}
